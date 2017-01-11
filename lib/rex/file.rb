@@ -66,7 +66,7 @@ module FileUtils
   # but clean ../something as well as path/with/..\traversal
   #
   def self.clean_path(old)
-    path = old
+    path = old.dup
     while(path.index(/\/..\/|\/..\\|\\..\\|\\..\/|\A..\\|\A..\//) != nil)
       path.gsub!(/\A..\\|\A..\//,'') #eliminate starting ..\ or ../
       path.gsub!(/\/..\/|\/..\\/,'/') #clean linux style
