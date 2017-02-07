@@ -62,5 +62,31 @@ describe Rex::FileUtils do
     it 'eliminates leading traversals from a windows path' do
       expect(Rex::FileUtils.clean_path('..\foo\home')).to eq 'foo\home'
     end
+
+    it 'eliminates embedded traversals from a linux path' do
+      expect(Rex::FileUtils.clean_path('foo/../home')).to eq 'foo/home'
+    end
+
+    it 'eliminates embedded traversals from a windows path' do
+      expect(Rex::FileUtils.clean_path('foo\..\home')).to eq 'foo\home'
+    end
+
+    it 'eliminates mixed traversals from a linux path' do
+      expect(Rex::FileUtils.clean_path('../foo/..\home')).to eq 'foo/home'
+      expect(Rex::FileUtils.clean_path('..\foo/..\home')).to eq 'foo/home'
+    end
+
+    it 'eliminates mixed traversals from a windows path' do
+      expect(Rex::FileUtils.clean_path('..\foo\../home')).to eq 'foo\home'
+      expect(Rex::FileUtils.clean_path('../foo\../home')).to eq 'foo\home'
+    end
+
+    it 'does not eliminate valid dirnames from a linux path' do
+      expect(Rex::FileUtils.clean_path('foo/ZZ/home')).to eq 'foo/ZZ/home'
+    end
+
+    it 'does not eliminate valid dirnames from a windows path' do
+      expect(Rex::FileUtils.clean_path('foo\ZZ\home')).to eq 'foo\ZZ\home'
+    end
   end
 end
