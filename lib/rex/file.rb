@@ -67,11 +67,17 @@ module FileUtils
   #
   def self.clean_path(old)
     path = old.dup
-    while(path.index(/\/..\/|\/..\\|\\..\\|\\..\/|\A..\\|\A..\//) != nil)
-      path.gsub!(/\A..\\|\A..\//,'') #eliminate starting ..\ or ../
-      path.gsub!(/\/..\/|\/..\\/,'/') #clean linux style
-      path.gsub!(/\\..\\|\\..\//,'\\') #clean windows style
+
+    leading       = /\A\.\.\\|\A\.\.\//   # '..\'  or '../'  at start of string
+    linux_style   = /\/\.\.\/|\/\.\.\\/   # '/../' or '/..\'
+    windows_style = /\\\.\.\\|\\\.\.\//   # '\..\' or '\../'
+
+    while(path.index(leading) != nil or path.index(linux_style) != nil or path.index(windows_style) != nil)
+      path.gsub!(leading,'')
+      path.gsub!(linux_style,'/')
+      path.gsub!(windows_style,'\\')
     end
+
     path
   end
 
