@@ -11,7 +11,7 @@ module Rex
 ###
 module ThreadSafe
 
-  DefaultCycle = 0.2
+  DEFAULT_CYCLE = 0.2
 
   #
   # Wraps calls to select with a lower timeout period and does the
@@ -33,7 +33,7 @@ module ThreadSafe
 
       # Poll the set supplied to us at least once.
       begin
-        rv = ::IO.select(rfd, wfd, efd, DefaultCycle)
+        rv = ::IO.select(rfd, wfd, efd, [left || DEFAULT_CYCLE, DEFAULT_CYCLE].min)
       rescue ::IOError, ::Errno::EBADF, ::Errno::ENOTSOCK
         # If a stream was detected as being closed, re-raise the error as
         # a StreamClosedError with the specific file descriptor that was
@@ -59,7 +59,7 @@ module ThreadSafe
       return rv if (rv)
 
       # Decrement the amount of time left by the polling cycle
-      left -= DefaultCycle if (left)
+      left -= DEFAULT_CYCLE if (left)
 
       # Keep chugging until we run out of time, if time was supplied.
     end while ((left == nil) or (left > 0))
