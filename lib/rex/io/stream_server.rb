@@ -92,13 +92,20 @@ module StreamServer
   #
   def close_client(client)
     if (client)
-      clients.delete(client)
+      detach_client(client)
 
       begin
         client.close
       rescue IOError
       end
     end
+  end
+
+  #
+  # Detach a client. You are now responsible for it, not us
+  #
+  def detach_client(client)
+    self.clients.delete(client)
   end
 
   #
@@ -189,7 +196,7 @@ protected
 
       sd[0].each { |cfd|
         begin
-          on_client_data(cfd)
+          on_client_data(cfd) if clients.include? cfd
         rescue ::EOFError, ::Errno::ECONNRESET, ::Errno::ENOTCONN, ::Errno::ECONNABORTED
           on_client_close(cfd)
           close_client(cfd)
@@ -205,7 +212,7 @@ protected
 
     rescue ::Rex::StreamClosedError => e
       # Remove the closed stream from the list
-      clients.delete(e.stream)
+      detach_client(e.stream)
     rescue ::Interrupt
       raise $!
     rescue ::Exception
