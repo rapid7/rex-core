@@ -102,7 +102,7 @@ module StreamServer
   end
 
   #
-  # Detatch a client. You are now responsible for it, not us
+  # Detach a client. You are now responsible for it, not us
   #
   def detach_client(client)
     self.clients.delete(client)
