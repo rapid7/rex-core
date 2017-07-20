@@ -33,7 +33,7 @@ module ThreadSafe
 
       # Poll the set supplied to us at least once.
       begin
-        rv = ::IO.select(rfd, wfd, efd, [left || DEFAULT_CYCLE, DEFAULT_CYCLE].min)
+        rv = ::IO.select(rfd, wfd, efd, DEFAULT_CYCLE)
       rescue ::IOError, ::Errno::EBADF, ::Errno::ENOTSOCK
         # If a stream was detected as being closed, re-raise the error as
         # a StreamClosedError with the specific file descriptor that was
