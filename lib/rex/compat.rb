@@ -84,6 +84,7 @@ end
 def self.is_android
   return @@is_android if @@is_android
   @@is_android = (RUBY_PLATFORM =~ /android/) ? true : false
+end
 
 def self.is_wow64
   return false if not is_windows
