@@ -30,7 +30,7 @@ ENABLE_PROCESSED_INPUT = 1
 # Platform detection
 #
 
-@@is_windows = @@is_cygwin = @@is_macosx = @@is_linux = @@is_bsdi = @@is_freebsd = @@is_netbsd = @@is_openbsd = @@is_java = false
+@@is_windows = @@is_cygwin = @@is_macosx = @@is_linux = @@is_bsdi = @@is_freebsd = @@is_netbsd = @@is_openbsd = @@is_java = @@is_android = false
 @@loaded_win32api  = false
 @@loaded_tempfile  = false
 @@loaded_fileutils = false
@@ -81,6 +81,10 @@ def self.is_java
   @@is_java = (RUBY_PLATFORM =~ /java/) ? true : false
 end
 
+def self.is_android
+  return @@is_android if @@is_android
+  @@is_android = (RUBY_PLATFORM =~ /android/) ? true : false
+
 def self.is_wow64
   return false if not is_windows
   is64 = false
@@ -127,6 +131,8 @@ def self.open_browser(url='http://google.com/')
     Win32API.new("shell32.dll", "ShellExecute", ["PPPPPL"], "L").call(nil, "open", url, nil, nil, 0)
   when /darwin/
     system("open #{url}")
+  when /android/
+    system("am start --user 0 -a android.intent.action.VIEW -d #{url}")
   else
     # Search through the PATH variable (if it exists) and chose a browser
     # We are making an assumption about the nature of "PATH" so tread lightly
@@ -182,6 +188,8 @@ def self.open_webrtc_browser(url='http://google.com/')
         return true
       end
     end
+  when /android/
+    system("am start --user 0 -a android.intent.action.VIEW -d #{url}")
   else
     if defined? ENV['PATH']
       ['google-chrome', 'chrome', 'chromium', 'firefox' , 'firefox', 'opera'].each do |browser|
@@ -207,6 +215,8 @@ def self.open_email(addr)
     Win32API.new("shell32.dll", "ShellExecute", ["PPPPPL"], "L").call(nil, "open", "mailto:"+addr, nil, nil, 0)
   when /darwin/
     system("open mailto:#{addr}")
+  when /android/
+    system("am start --user 0 -a android.intent.action.VIEW -d mailto:#{addr}")
   else
     # ?
   end
@@ -223,6 +233,8 @@ def self.play_sound(path)
     Win32API.new("winmm.dll", "sndPlaySoundA", ["SI"], "I").call(path, 0x20000)
   when /darwin/
     system("afplay #{path} >/dev/null 2>&1")
+  when /android/
+    system("termux-open #{path}")
   else
     system("aplay #{path} >/dev/null 2>&1")
   end
