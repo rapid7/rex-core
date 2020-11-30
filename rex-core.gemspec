@@ -6,8 +6,8 @@ require 'rex/core/version'
 Gem::Specification.new do |spec|
   spec.name          = "rex-core"
   spec.version       = Rex::Core::VERSION
-  spec.authors       = ["David Maloney"]
-  spec.email         = ["DMaloney@rapid7.com"]
+  spec.authors       = ['Metasploit Hackers']
+  spec.email         = ['msfdev@metasploit.com']
 
   spec.summary       = %q{Core libraries required for the Ruby Exploitation (Rex) Suite.}
   spec.description   = %q{Core libraries required for the Ruby Exploitation (Rex) Suite.
@@ -19,7 +19,6 @@ Gem::Specification.new do |spec|
 
   spec.required_ruby_version = '>= 2.2.0'
 
-  spec.add_development_dependency "bundler", "~> 1.12"
-  spec.add_development_dependency "rake", "~> 10.0"
-  spec.add_development_dependency "rspec", "~> 3.0"
+  spec.add_development_dependency "rake"
+  spec.add_development_dependency "rspec"
 end
