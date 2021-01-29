@@ -26,6 +26,22 @@ module Stream
   ##
 
   #
+  # Initialize synchronization for this stream. This should be used if the
+  # stream will be written to, read or closed from multiple threads.
+  #
+  def initialize_synchronization
+    self.stream_lock = Rex::ReadWriteLock.new
+    self.close_resource = false
+  end
+
+  def close
+    self.close_resource = true
+    synchronize_update {
+      super
+    }
+  end
+
+  #
   # This method writes the supplied buffer to the stream.  This method
   # intelligent reduces the size of supplied buffers so that ruby doesn't get
   # into a potential global thread blocking state when used on blocking
@@ -37,28 +53,31 @@ module Stream
     total_length = buf.length
     block_size   = 32768
 
-    begin
-      while( total_sent < total_length )
-        s = Rex::ThreadSafe.select( nil, [ fd ], nil, 0.2 )
-        if( s == nil || s[0] == nil )
-          next
+    synchronize_access {
+      begin
+        while( total_sent < total_length )
+          s = Rex::ThreadSafe.select( nil, [ fd ], nil, 0.2 )
+          if( s == nil || s[0] == nil )
+            next
+          end
+          data = buf[total_sent, block_size]
+          sent = fd.write_nonblock( data )
+          if sent > 0
+            total_sent += sent
+          end
         end
-        data = buf[total_sent, block_size]
-        sent = fd.write_nonblock( data )
-        if sent > 0
-          total_sent += sent
-        end
+      rescue ::Errno::EAGAIN, ::Errno::EWOULDBLOCK
+        return nil if self.close_resource
+        # Sleep for a half a second, or until we can write again
+        Rex::ThreadSafe.select( nil, [ fd ], nil, 0.5 )
+        # Decrement the block size to handle full sendQs better
+        block_size = 1024
+        # Try to write the data again
+        retry
+      rescue ::IOError, ::Errno::EPIPE
+        return nil
       end
-    rescue ::Errno::EAGAIN, ::Errno::EWOULDBLOCK
-      # Sleep for a half a second, or until we can write again
-      Rex::ThreadSafe.select( nil, [ fd ], nil, 0.5 )
-      # Decrement the block size to handle full sendQs better
-      block_size = 1024
-      # Try to write the data again
-      retry
-    rescue ::IOError, ::Errno::EPIPE
-      return nil
-    end
+    }
 
     total_sent
   end
@@ -67,17 +86,19 @@ module Stream
   # This method reads data of the supplied length from the stream.
   #
   def read(length = nil, opts = {})
-
-    begin
-      return fd.read_nonblock( length )
-    rescue ::Errno::EAGAIN, ::Errno::EWOULDBLOCK
-      # Sleep for a half a second, or until we can read again
-      Rex::ThreadSafe.select( [ fd ], nil, nil, 0.5 )
-      # Decrement the block size to handle full sendQs better
-      retry
-    rescue ::IOError, ::Errno::EPIPE
-      return nil
-    end
+    synchronize_access {
+      begin
+        return fd.read_nonblock( length )
+      rescue ::Errno::EAGAIN, ::Errno::EWOULDBLOCK
+        return nil if self.close_resource
+        # Sleep for a half a second, or until we can read again
+        Rex::ThreadSafe.select( [ fd ], nil, nil, 0.5 )
+        # Decrement the block size to handle full sendQs better
+        retry
+      rescue ::IOError, ::Errno::EPIPE
+        return nil
+      end
+    }
   end
 
   #
@@ -306,6 +327,45 @@ module Stream
 
 protected
 
+  #
+  # The read-write lock used to synchronize access to the stream. This is only
+  # set when synchronization has been initialized as performed by
+  # #initialize_synchronization.
+  #
+  attr_accessor :stream_lock
+
+  #
+  # A boolean flag indicating that the resource is to be closed. Blocking
+  # operations that are synchronized (such as #read and #write) should evaluate
+  # this flag and exit appropriately when there is no data to be processed.
+  attr_accessor :close_resource
+
+  #
+  # Synchronize non-state changing access to the stream such as read and write
+  # operations. If synchronization has not been initialized, this doesn't do
+  # anything.
+  #
+  def synchronize_access
+    self.stream_lock.lock_read unless self.stream_lock.nil?
+    begin
+      yield
+    ensure
+      self.stream_lock.unlock_read unless self.stream_lock.nil?
+    end
+  end
+
+  #
+  # Synchronize state changing operations to the stream such as closing it.
+  # If synchronization has not been initialized, this doesn't do anything.
+  #
+  def synchronize_update
+    self.stream_lock.lock_write unless self.stream_lock.nil?
+    begin
+      yield
+    ensure
+      self.stream_lock.unlock_write unless self.stream_lock.nil?
+    end
+  end
 end
 
 end end
