@@ -19,9 +19,13 @@ module StreamAbstraction
   #
   def initialize_abstraction
     self.lsock, self.rsock = Rex::Socket.tcp_socket_pair()
+
     self.lsock.extend(Rex::IO::Stream)
     self.lsock.extend(Ext)
     self.rsock.extend(Rex::IO::Stream)
+
+    self.lsock.initialize_synchronization
+    self.rsock.initialize_synchronization
 
     self.monitor_rsock("StreamMonitorRemote")
   end
