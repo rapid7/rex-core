@@ -130,7 +130,7 @@ module Find
     paths.collect!{|d| d.dup}
     while file = paths.shift
       catch(:prune) do
-        yield file.dup.taint
+        yield file.dup
         next unless File.exist? file
         begin
           if File.stat(file).directory? then
@@ -145,7 +145,7 @@ module Find
                 else
                   f = File.join(file, f)
                 end
-                paths.unshift f.untaint
+                paths.unshift f
               end
             ensure
               d.close
