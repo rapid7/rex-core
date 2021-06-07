@@ -61,7 +61,7 @@ module Stream
             next
           end
           data = buf[total_sent, block_size]
-          sent = fd.write_nonblock( data )
+          sent = fd.syswrite( data )
           if sent > 0
             total_sent += sent
           end
