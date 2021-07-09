@@ -145,9 +145,10 @@ end
 #
 ###
 module HostCommunicationError
-  def initialize(addr = nil, port = nil)
-    self.host = addr
-    self.port = port
+  def initialize(addr = nil, port = nil, reason: nil)
+    @host = addr
+    @port = port
+    @reason = reason
   end
 
   #
@@ -156,7 +157,7 @@ module HostCommunicationError
   #
   def addr_to_s
     if host and port
-      "(#{host}:#{port})"
+      host.include?(':') ? "([#{host}]:#{port})" : "(#{host}:#{port})"
     elsif host
       "(#{host})"
     else
@@ -164,7 +165,13 @@ module HostCommunicationError
     end
   end
 
-  attr_accessor :host, :port
+  def to_s
+    str = super
+    str << " #{@reason}" if @reason
+    str
+  end
+
+  attr_accessor :host, :port, :reason
 end
 
 
@@ -186,7 +193,9 @@ end
 ###
 class ConnectionRefused < ConnectionError
   def to_s
-    "The connection was refused by the remote host #{addr_to_s}."
+    str = "The connection was refused by the remote host #{addr_to_s}."
+    str << " #{@reason}" unless @reason.nil?
+    str
   end
 end
 
@@ -198,7 +207,9 @@ end
 ###
 class HostUnreachable < ConnectionError
   def to_s
-    "The host #{addr_to_s} was unreachable."
+    str = "The host #{addr_to_s} was unreachable."
+    str << " #{@reason}" unless @reason.nil?
+    str
   end
 end
 
@@ -209,7 +220,9 @@ end
 ###
 class ConnectionTimeout < ConnectionError
   def to_s
-    "The connection timed out #{addr_to_s}."
+    str = "The connection with #{addr_to_s} timed out."
+    str << " #{@reason}" unless @reason.nil?
+    str
   end
 end
 
@@ -220,18 +233,17 @@ end
 #
 ###
 class InvalidDestination < ConnectionError
-  include SocketError
-  include HostCommunicationError
-
   def to_s
-    "The destination is invalid: #{addr_to_s}."
+    str = "The destination is invalid: #{addr_to_s}."
+    str << " #{@reason}" unless @reason.nil?
+    str
   end
 end
 
 ###
 #
 # This exception is raised when an attempt to use an address or port that is
-# already in use or onot available occurs. such as binding to a host on a
+# already in use or not available occurs. such as binding to a host on a
 # given port that is already in use, or when a bind address is specified that
 # is not available to the host.
 #
@@ -241,7 +253,9 @@ class BindFailed < ::ArgumentError
   include HostCommunicationError
 
   def to_s
-    "The address is already in use or unavailable: #{addr_to_s}."
+    str = "The address is already in use or unavailable: #{addr_to_s}."
+    str << " #{@reason}" unless @reason.nil?
+    str
   end
 end
 
@@ -255,11 +269,10 @@ end
 #
 ##
 class AddressInUse < ConnectionError
-  include SocketError
-  include HostCommunicationError
-
   def to_s
-    "The address is already in use or unavailable: #{addr_to_s}."
+    str = "The address is already in use or unavailable: #{addr_to_s}."
+    str << " #{@reason}" unless @reason.nil?
+    str
   end
 end
 
