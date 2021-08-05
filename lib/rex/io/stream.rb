@@ -67,7 +67,10 @@ module Stream
           end
         end
       rescue ::Errno::EAGAIN, ::Errno::EWOULDBLOCK
-        return nil if self.close_resource
+        if self.close_resource
+          fd.close
+          return nil
+        end
         # Sleep for a half a second, or until we can write again
         Rex::ThreadSafe.select( nil, [ fd ], nil, 0.5 )
         # Decrement the block size to handle full sendQs better
@@ -90,7 +93,10 @@ module Stream
       begin
         return fd.read_nonblock( length )
       rescue ::Errno::EAGAIN, ::Errno::EWOULDBLOCK
-        return nil if self.close_resource
+        if self.close_resource
+          fd.close
+          return nil
+        end
         # Sleep for a half a second, or until we can read again
         Rex::ThreadSafe.select( [ fd ], nil, nil, 0.5 )
         # Decrement the block size to handle full sendQs better
