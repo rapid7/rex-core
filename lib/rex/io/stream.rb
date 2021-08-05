@@ -60,7 +60,7 @@ module Stream
           if( s == nil || s[0] == nil )
             next
           end
-          data = buf[total_sent, block_size]
+          data = buf[total_sent, total_sent + block_size]
           sent = fd.write_nonblock( data )
           if sent > 0
             total_sent += sent
