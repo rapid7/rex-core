@@ -325,21 +325,6 @@ module Stream
     16384
   end
 
-protected
-
-  #
-  # The read-write lock used to synchronize access to the stream. This is only
-  # set when synchronization has been initialized as performed by
-  # #initialize_synchronization.
-  #
-  attr_accessor :stream_lock
-
-  #
-  # A boolean flag indicating that the resource is to be closed. Blocking
-  # operations that are synchronized (such as #read and #write) should evaluate
-  # this flag and exit appropriately when there is no data to be processed.
-  attr_accessor :close_resource
-
   #
   # Synchronize non-state changing access to the stream such as read and write
   # operations. If synchronization has not been initialized, this doesn't do
@@ -366,6 +351,21 @@ protected
       self.stream_lock.unlock_write unless self.stream_lock.nil?
     end
   end
+
+protected
+
+  #
+  # The read-write lock used to synchronize access to the stream. This is only
+  # set when synchronization has been initialized as performed by
+  # #initialize_synchronization.
+  #
+  attr_accessor :stream_lock
+
+  #
+  # A boolean flag indicating that the resource is to be closed. Blocking
+  # operations that are synchronized (such as #read and #write) should evaluate
+  # this flag and exit appropriately when there is no data to be processed.
+  attr_accessor :close_resource
 end
 
 end end
