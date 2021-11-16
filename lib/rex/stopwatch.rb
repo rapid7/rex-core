@@ -1,4 +1,4 @@
-module Rex
+module Rex::Stopwatch
 
   # This provides a correct way to time an operation provided within a block.
   #
@@ -7,7 +7,7 @@ module Rex
   # @yield [] The block whose operation should be timed.
   #
   # @return Returns the result of the block and the elapsed time in seconds.
-  def self.stopwatch
+  def self.elapsed_seconds
     start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     ret = yield
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - start
