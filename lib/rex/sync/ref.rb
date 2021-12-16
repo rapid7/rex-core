@@ -32,6 +32,10 @@ module Ref
     self
   end
 
+  # Prevent duplication of stateful reference counted objects such
+  # as those performed by :replicant Scanner mixin
+  alias :dup :ref
+
   #
   # Decrements the total number of references.  If the reference count
   # reaches zero, true is returned.  Otherwise, false is returned.
