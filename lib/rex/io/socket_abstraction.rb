@@ -53,6 +53,9 @@ module Rex
       #
       def cleanup_abstraction
         lsock.close if lsock and !lsock.closed?
+
+        monitor_thread.join if monitor_thread&.alive?
+
         rsock.close if rsock and !rsock.closed?
 
         self.lsock = nil
@@ -159,10 +162,10 @@ module Rex
                   # Using syswrite() breaks SSL streams.
                   sent = write(data)
 
-                  # sf: Only remove the data off the queue is write was successfull.
-                  #     This way we naturally perform a resend if a failure occured.
+                  # sf: Only remove the data off the queue is write was successful.
+                  #     This way we naturally perform a resend if a failure occurred.
                   #     Catches an edge case with meterpreter TCP channels where remote send
-                  #     failes gracefully and a resend is required.
+                  #     fails gracefully and a resend is required.
                   if sent.nil?
                     closed = true
                     wlog('monitor_rsock: failed writing, socket must be dead')
@@ -182,7 +185,7 @@ module Rex
 
             begin
               close_write if respond_to?('close_write')
-            rescue IOError
+            rescue StandardError
             end
             break
           end
