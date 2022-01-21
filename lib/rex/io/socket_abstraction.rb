@@ -114,18 +114,35 @@ module Rex
       #
       attr_reader :rsock
 
+      module MonitoredRSock
+        def close
+          @close_requested = true
+          @monitor_thread.join
+          nil
+        end
+
+        def sysclose
+          self.class.instance_method(:close).bind(self).call
+        end
+
+        attr_reader :close_requested
+        attr_writer :monitor_thread
+      end
+
       protected
 
       def monitor_rsock(threadname = 'SocketMonitorRemote')
-        self.monitor_thread = Rex::ThreadFactory.spawn(threadname, false) do
+        rsock.extend(MonitoredRSock)
+        rsock.monitor_thread = self.monitor_thread = Rex::ThreadFactory.spawn(threadname, false) do
           loop do
-            closed = false
-            buf = nil
+            closed = rsock.nil? || rsock.close_requested
 
-            unless rsock
-              wlog('monitor_rsock: the remote socket is nil, exiting loop')
+            if closed
+              wlog('monitor_rsock: the remote socket has been closed, exiting loop')
               break
             end
+
+            buf = nil
 
             begin
               s = Rex::ThreadSafe.select([rsock], nil, nil, 0.2)
@@ -187,12 +204,16 @@ module Rex
               close_write if respond_to?('close_write')
             rescue StandardError
             end
+
             break
           end
+
+          rsock.sysclose
         end
       end
 
       attr_accessor :monitor_thread
       attr_writer :lsock, :rsock
     end
-  end; end
+  end
+end
