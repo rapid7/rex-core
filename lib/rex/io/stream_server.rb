@@ -141,7 +141,7 @@ module Rex
           begin
             cli = accept
             unless cli
-              elog("The accept() returned nil in stream server listener monitor:  #{fd.inspect}")
+              elog('The accept() returned nil in stream server listener monitor')
               ::IO.select(nil, nil, nil, 0.10)
               next
             end

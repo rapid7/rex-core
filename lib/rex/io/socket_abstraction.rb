@@ -53,6 +53,9 @@ module Rex
       #
       def cleanup_abstraction
         lsock.close if lsock and !lsock.closed?
+
+        monitor_thread.join if monitor_thread&.alive?
+
         rsock.close if rsock and !rsock.closed?
 
         self.lsock = nil
@@ -111,18 +114,35 @@ module Rex
       #
       attr_reader :rsock
 
+      module MonitoredRSock
+        def close
+          @close_requested = true
+          @monitor_thread.join
+          nil
+        end
+
+        def sysclose
+          self.class.instance_method(:close).bind(self).call
+        end
+
+        attr_reader :close_requested
+        attr_writer :monitor_thread
+      end
+
       protected
 
       def monitor_rsock(threadname = 'SocketMonitorRemote')
-        self.monitor_thread = Rex::ThreadFactory.spawn(threadname, false) do
+        rsock.extend(MonitoredRSock)
+        rsock.monitor_thread = self.monitor_thread = Rex::ThreadFactory.spawn(threadname, false) do
           loop do
-            closed = false
-            buf = nil
+            closed = rsock.nil? || rsock.close_requested
 
-            unless rsock
-              wlog('monitor_rsock: the remote socket is nil, exiting loop')
+            if closed
+              wlog('monitor_rsock: the remote socket has been closed, exiting loop')
               break
             end
+
+            buf = nil
 
             begin
               s = Rex::ThreadSafe.select([rsock], nil, nil, 0.2)
@@ -159,10 +179,10 @@ module Rex
                   # Using syswrite() breaks SSL streams.
                   sent = write(data)
 
-                  # sf: Only remove the data off the queue is write was successfull.
-                  #     This way we naturally perform a resend if a failure occured.
+                  # sf: Only remove the data off the queue is write was successful.
+                  #     This way we naturally perform a resend if a failure occurred.
                   #     Catches an edge case with meterpreter TCP channels where remote send
-                  #     failes gracefully and a resend is required.
+                  #     fails gracefully and a resend is required.
                   if sent.nil?
                     closed = true
                     wlog('monitor_rsock: failed writing, socket must be dead')
@@ -182,14 +202,18 @@ module Rex
 
             begin
               close_write if respond_to?('close_write')
-            rescue IOError
+            rescue StandardError
             end
+
             break
           end
+
+          rsock.sysclose
         end
       end
 
       attr_accessor :monitor_thread
       attr_writer :lsock, :rsock
     end
-  end; end
+  end
+end
