@@ -1,0 +1,45 @@
+name: Verify
+
+on:
+  push:
+    branches:
+      - '*'
+  pull_request:
+    branches:
+      - '*'
+
+jobs:
+  test:
+    runs-on: ubuntu-18.04
+    timeout-minutes: 40
+
+    strategy:
+      fail-fast: true
+      matrix:
+        ruby:
+          - 2.6
+          - 2.7
+          - 3.0
+        test_cmd:
+          - bundle exec rspec
+
+    env:
+      RAILS_ENV: test
+
+    name: Ruby ${{ matrix.ruby }} - ${{ matrix.test_cmd }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+
+      - name: ${{ matrix.test_cmd }}
+        run: |
+          echo "${CMD}"
+          bash -c "${CMD}"
+        env:
+          CMD: ${{ matrix.test_cmd }}
