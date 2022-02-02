@@ -10,11 +10,38 @@ module Rex
 #
 ###
 module Ref
+  #
+  # Raises a TypeError to prevent cloning.
+  #
+  def clone
+    raise TypeError, "can't clone instance of Ref #{self.class}"
+  end
+
+  #
+  # Raises a TypeError to prevent duping.
+  #
+  def dup
+    raise TypeError, "can't dup instance of Ref #{self.class}"
+  end
+
+  #
+  # Ensures that the Ref is correctly initialized when extended on an object:
+  # ```
+  # arbitrary_resource = Resource.new
+  # arbitrary_resource.extend(::Rex::Ref)
+  # ```
+  #
+  # @param instance [object] the instance that has just extended the Ref module
+  def self.extended(instance)
+    instance.refinit
+  end
 
   #
   # Initializes the reference count to one.
   #
   def refinit
+    return if defined?(@_references)
+
     @_references       = 1
     @_references_mutex = Mutex.new
 
