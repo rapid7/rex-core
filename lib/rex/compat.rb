@@ -133,6 +133,7 @@ def self.open_browser(url='http://google.com/')
   when /darwin/
     system("open #{url}")
   when /android/
+    url = "file://#{url}" if url.to_s.start_with?('/')
     system("am start --user 0 -a android.intent.action.VIEW -d #{url}")
   else
     # Search through the PATH variable (if it exists) and chose a browser
@@ -190,6 +191,7 @@ def self.open_webrtc_browser(url='http://google.com/')
       end
     end
   when /android/
+    url = "file://#{url}" if url.to_s.start_with?('/')
     system("am start --user 0 -a android.intent.action.VIEW -d #{url}")
   else
     if defined? ENV['PATH']
