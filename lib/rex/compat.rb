@@ -138,7 +138,9 @@ def self.open_browser(url='http://google.com/')
   else
     # Search through the PATH variable (if it exists) and chose a browser
     # We are making an assumption about the nature of "PATH" so tread lightly
-    if defined? ENV['PATH']
+    #
+    # If DISPLAY is not set, most unix graphical tools will not work.
+    if ENV['PATH'] && ENV['DISPLAY']
       # "xdg-open" is more general than "sensible-browser" and can be useful for lots of
       # file types -- text files, pcaps, or URLs. It's nearly always
       # going to use the application the user is expecting. If we're not
@@ -194,7 +196,8 @@ def self.open_webrtc_browser(url='http://google.com/')
     url = "file://#{url}" if url.to_s.start_with?('/')
     system("am start --user 0 -a android.intent.action.VIEW -d #{url}")
   else
-    if defined? ENV['PATH']
+    # If DISPLAY is not set, most unix graphical tools will not work.
+    if ENV['PATH'] && ENV['DISPLAY']
       ['google-chrome', 'chrome', 'chromium', 'firefox' , 'firefox', 'opera'].each do |browser|
         ENV['PATH'].split(':').each do |path|
           browser_path = "#{path}/#{browser}"
