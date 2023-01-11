@@ -18,8 +18,8 @@ end
 class TimeoutError < Interrupt
   include Exception
 
-  def to_s
-    "Operation timed out."
+  def initialize(msg = "Operation timed out.")
+    super(msg)
   end
 end
 
@@ -32,8 +32,8 @@ end
 class NotImplementedError < ::NotImplementedError
   include Exception
 
-  def to_s
-    "The requested method is not implemented."
+  def initialize(msg = "The requested method is not implemented.")
+    super(msg)
   end
 end
 
@@ -76,8 +76,8 @@ end
 class ArgumentParseError < ::ArgumentError
   include Exception
 
-  def to_s
-    "The argument could not be parsed correctly."
+  def initialize(msg = "The argument could not be parsed correctly.")
+    super(msg)
   end
 end
 
