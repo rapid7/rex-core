@@ -1,5 +1,11 @@
 # -*- coding: binary -*-
 
+require 'rex/logging/sinks/stream'
+require 'rex/logging/sinks/flatfile'
+require 'rex/logging/sinks/timestamp_colorless_flatfile'
+require 'rex/logging/sinks/stderr'
+require 'rex/logging/sinks/stdout'
+require 'rex/logging/sinks/stdout_without_timestamps'
 
 module Rex
   module Logging
