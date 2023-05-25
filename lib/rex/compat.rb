@@ -198,7 +198,7 @@ def self.open_webrtc_browser(url='http://google.com/')
   else
     # If DISPLAY is not set, most unix graphical tools will not work.
     if ENV['PATH'] && ENV['DISPLAY']
-      ['xdg-open', 'google-chrome', 'chrome', 'chromium', 'firefox' , 'firefox', 'opera'].each do |browser|
+      [ENV['MSF_BROWSER_BIN'], 'google-chrome', 'chrome', 'chromium', 'firefox', 'opera'].compact.each do |browser|
         ENV['PATH'].split(':').each do |path|
           browser_path = "#{path}/#{browser}"
           if File.exist?(browser_path)
