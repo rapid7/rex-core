@@ -35,10 +35,10 @@ ENABLE_PROCESSED_INPUT = 1
 @@loaded_tempfile  = false
 @@loaded_fileutils = false
 
-
 def self.is_windows
   return @@is_windows if @@is_windows
-  @@is_windows = (RUBY_PLATFORM =~ /mswin(32|64)|mingw(32|64)/) ? true : false
+  # Additionally detect x64-mingw-ucrt - https://rubyinstaller.org/2022/11/27/rubyinstaller-3.1.3-1-3.0.5-1-and-2.7.7-1-released.html
+  @@is_windows = (RUBY_PLATFORM =~ /mswin(32|64)|mingw(32|64|\-ucrt)/) ? true : false
 end
 
 def self.is_cygwin
