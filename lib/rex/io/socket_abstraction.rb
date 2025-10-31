@@ -14,10 +14,6 @@ module Rex
     ###
     module SocketAbstraction
 
-      # Hints for which side is initiating a close operation
-      CLOSE_MODE_REMOTE = :remote
-      CLOSE_MODE_LOCAL = :local
-
       ###
       #
       # Extension information for required Stream interface.
@@ -51,9 +47,6 @@ module Rex
       # Override this method to init the abstraction
       #
       def initialize_abstraction
-        # when closing, a hint for who initiated the close to prevent operations from being repeated
-        @close_mode = nil
-
         self.lsock, self.rsock = Rex::Compat.pipe
       end
 
@@ -63,7 +56,7 @@ module Rex
       def cleanup_abstraction
         lsock.close if lsock and !lsock.closed?
 
-        monitor_thread.join if monitor_thread&.alive?
+        monitor_thread.join if monitor_thread&.alive? && monitor_thread&.object_id != Thread.current.object_id
 
         rsock.close if rsock and !rsock.closed?
 
@@ -124,24 +117,6 @@ module Rex
       attr_reader :rsock
 
       protected
-
-      def close_from_local
-        @close_mode = CLOSE_MODE_LOCAL
-        close
-      end
-
-      def close_from_remote
-        @close_mode = CLOSE_MODE_REMOTE
-        close
-      end
-
-      def closing_from_remote?
-        @close_mode == CLOSE_MODE_REMOTE
-      end
-
-      def closing_from_local?
-        @close_mode == CLOSE_MODE_LOCAL
-      end
 
       def monitor_rsock(name = 'MonitorRemote')
         if respond_to?(:close_write)
