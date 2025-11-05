@@ -134,7 +134,7 @@ module Rex
       end
 
       def monitor_thread
-        @relay_manager.thread
+        @relay_manager&.thread
       end
 
       attr_writer :lsock, :rsock
