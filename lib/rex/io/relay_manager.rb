@@ -82,7 +82,12 @@ class RelayManager
   rescue EOFError
     nil
   rescue => e
-    elog("#{self.class.name}#relay_fiber(name: #{name}): #{e.class} #{e}", error: e)
+    message = "#{self.class.name}#relay_fiber(name: #{name}): #{e.class} #{e}"
+    if defined?(elog)  # elog is defined by framework, otherwise use stderr
+      elog(message, error: e)
+    else
+      $stderr.puts message
+    end
   ensure
     unless sock.closed?
       sock.close rescue nil
