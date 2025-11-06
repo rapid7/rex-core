@@ -19,7 +19,7 @@ module IO
       @mutex = Mutex.new
     end
 
-    # This allows the fiber to be scheduled in the #run thread from another
+    # This allows the fiber to be scheduled in the #run thread from another thread
     def schedule_fiber(&block)
       @mutex.synchronize do
         @pending << block
@@ -127,6 +127,10 @@ module IO
       run
       @urgent.each(&:close)
       @urgent = nil
+    end
+
+    def closed?
+      @urgent.nil?
     end
 
     def fiber(&block)

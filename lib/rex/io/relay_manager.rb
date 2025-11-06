@@ -63,7 +63,7 @@ class RelayManager
 
   def run
     old_scheduler = Fiber.scheduler
-    # A fibee scheduler can be set per-thread
+    # A fiber scheduler can be set per-thread
     Fiber.set_scheduler(@scheduler)
 
     # Run the scheduler (blocks here)
