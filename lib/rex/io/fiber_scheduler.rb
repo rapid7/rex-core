@@ -1,5 +1,6 @@
 require 'fiber'
 require 'io/nonblock'
+require 'rex/compat'
 
 module Rex
 module IO
@@ -14,7 +15,7 @@ module IO
       @ready = []
       @pending = []
       @blocking = 0
-      @urgent = ::IO.pipe
+      @urgent = Rex::Compat.pipe
       @mutex = Mutex.new
     end
 
@@ -41,7 +42,12 @@ module IO
           fiber.resume
         end
 
-        readable, writable = ::IO.select(@readable.keys + [@urgent.first], @writable.keys, [], 0.1)
+        begin
+          readable, writable = ::IO.select(@readable.keys + [@urgent.first], @writable.keys, [], 0.1)
+        rescue ::IOError
+          cleanup_closed_ios
+          next
+        end
 
         # Drain the urgent pipe
         if readable&.include?(@urgent.first)
@@ -133,6 +139,12 @@ module IO
 
     def current_time
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    def cleanup_closed_ios
+      @readable.delete_if { |io, _| io.closed? rescue true }
+      @writable.delete_if { |io, _| io.closed? rescue true }
+      @waiting.delete_if { |fiber, _| !fiber || !fiber.alive? rescue true }
     end
   end
 
