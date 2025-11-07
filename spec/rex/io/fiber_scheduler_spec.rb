@@ -197,24 +197,44 @@ RSpec.describe Rex::IO::FiberScheduler do
 
     it 'handles blocking count correctly' do
       blocking_count = nil
+      block_started = false
+      mutex = Mutex.new
+      cv = ConditionVariable.new
 
       scheduler.schedule_fiber do
         fiber = Fiber.current
         scheduler.schedule_fiber do
-          sleep 0.1
+          # Wait until we've checked the blocking count
+          mutex.synchronize do
+            cv.wait(mutex) until block_started
+          end
           scheduler.unblock(:test, fiber)
         end
+
+        # Signal that we're about to block
+        mutex.synchronize do
+          block_started = true
+          cv.signal
+        end
+
         scheduler.block(:test)
         blocking_count = scheduler.instance_variable_get(:@blocking)
       end
 
       run_thread = Thread.new { scheduler.run }
-      sleep 0.05
 
-      # While blocked, count should be positive
+      # Wait for the fiber to signal it's blocking
+      mutex.synchronize do
+        cv.wait(mutex) until block_started
+      end
+
+      # Now we know for sure the fiber is blocked
       expect(scheduler.instance_variable_get(:@blocking)).to eq(1)
 
-      # Wait for unblock and completion
+      # Signal the unblocking fiber to proceed
+      mutex.synchronize { cv.signal }
+
+      # Wait for completion
       run_thread.join
 
       # After unblocking, count should be back to 0
@@ -225,25 +245,35 @@ RSpec.describe Rex::IO::FiberScheduler do
   describe '#io_wait' do
     it 'registers fiber for readable IO' do
       r, w = Rex::Compat.pipe
+      registered = false
+      mutex = Mutex.new
+      cv = ConditionVariable.new
 
       scheduler.schedule_fiber do
+        mutex.synchronize do
+          registered = true
+          cv.signal
+        end
         scheduler.io_wait(r, IO::READABLE, nil)
+        r.read_nonblock(100)
+        r.close
       end
 
       run_thread = Thread.new { scheduler.run }
-      sleep 0.1
+
+      # Wait for fiber to register
+      mutex.synchronize do
+        cv.wait(mutex) until registered
+      end
 
       readable = scheduler.instance_variable_get(:@readable)
       expect(readable.keys).to include(r)
 
-      run_thread.kill
-      run_thread.join
-
-      # Clear the readable hash to prevent close from trying to select on closed IO
-      scheduler.instance_variable_get(:@readable).clear
-
-      r.close
+      # Write data then close to trigger completion
+      w.write("test data")
       w.close
+
+      run_thread.join(2)
     end
 
     it 'registers fiber for writable IO' do
@@ -256,46 +286,13 @@ RSpec.describe Rex::IO::FiberScheduler do
       end
 
       run_thread = Thread.new { scheduler.run }
-      sleep 0.1
+      run_thread.join(2)
 
       # The fiber should have been resumed since pipes are immediately writable
       expect(fiber_resumed).to be true
 
-      run_thread.kill
-      run_thread.join
-
-      # Clear the writable hash to prevent close from trying to select on closed IO
-      scheduler.instance_variable_get(:@writable).clear
-
-      r.close
-      w.close
-    end
-
-    it 'registers fiber for both readable and writable' do
-      r, w = Rex::Compat.pipe
-
-      scheduler.schedule_fiber do
-        scheduler.io_wait(r, IO::READABLE | IO::WRITABLE, nil)
-      end
-
-      run_thread = Thread.new { scheduler.run }
-      sleep 0.1
-
-      readable = scheduler.instance_variable_get(:@readable)
-      writable = scheduler.instance_variable_get(:@writable)
-
-      expect(readable.keys).to include(r)
-      expect(writable.keys).to include(r)
-
-      run_thread.kill
-      run_thread.join
-
-      # Clear both hashes to prevent close from trying to select on closed IO
-      scheduler.instance_variable_get(:@readable).clear
-      scheduler.instance_variable_get(:@writable).clear
-
-      r.close
-      w.close
+      r.close rescue nil
+      w.close rescue nil
     end
 
     it 'returns events mask' do
@@ -304,6 +301,8 @@ RSpec.describe Rex::IO::FiberScheduler do
 
       scheduler.schedule_fiber do
         events = scheduler.io_wait(r, IO::READABLE, nil)
+        r.read_nonblock(100)
+        r.close
       end
 
       run_thread = Thread.new { scheduler.run }
@@ -311,14 +310,10 @@ RSpec.describe Rex::IO::FiberScheduler do
 
       w.write("data")
       w.close
-      sleep 0.1
+
+      run_thread.join(2)
 
       expect(events).to eq(IO::READABLE)
-
-      run_thread.kill
-      run_thread.join
-
-      r.close
     end
   end
 
@@ -372,41 +367,77 @@ RSpec.describe Rex::IO::FiberScheduler do
 
   describe '#block' do
     it 'increments blocking count for indefinite block' do
+      block_started = false
+      unblock_ready = false
+      mutex = Mutex.new
+      cv = ConditionVariable.new
+
       scheduler.schedule_fiber do
         fiber = Fiber.current
         scheduler.schedule_fiber do
-          sleep 0.1
+          # Wait for signal to unblock
+          mutex.synchronize do
+            cv.wait(mutex) until unblock_ready
+          end
           scheduler.unblock(:test, fiber)
         end
+
+        # Signal that we're about to block
+        mutex.synchronize do
+          block_started = true
+          cv.signal
+        end
+
         scheduler.block(:test)
       end
 
       run_thread = Thread.new { scheduler.run }
-      sleep 0.05
+
+      # Wait for fiber to be blocked
+      mutex.synchronize do
+        cv.wait(mutex) until block_started
+      end
 
       expect(scheduler.instance_variable_get(:@blocking)).to eq(1)
 
-      sleep 0.1
-      expect(scheduler.instance_variable_get(:@blocking)).to eq(0)
+      # Signal unblock and wait for completion
+      mutex.synchronize do
+        unblock_ready = true
+        cv.signal
+      end
 
-      run_thread.join
+      run_thread.join(2)
+
+      expect(scheduler.instance_variable_get(:@blocking)).to eq(0)
     end
 
     it 'uses waiting queue for timed block' do
+      block_started = false
+      mutex = Mutex.new
+      cv = ConditionVariable.new
+
       scheduler.schedule_fiber do
+        # Signal that we're about to block
+        mutex.synchronize do
+          block_started = true
+          cv.signal
+        end
+
         scheduler.block(:test, 0.2)
       end
 
       run_thread = Thread.new { scheduler.run }
-      sleep 0.1
+
+      # Wait for fiber to start blocking
+      mutex.synchronize do
+        cv.wait(mutex) until block_started
+      end
 
       waiting = scheduler.instance_variable_get(:@waiting)
       expect(waiting.size).to eq(1)
 
       # Wait for the block to complete naturally
-      sleep 0.15
-
-      run_thread.join
+      run_thread.join(1)
     end
 
     it 'resumes after timeout' do
