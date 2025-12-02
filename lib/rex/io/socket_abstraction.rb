@@ -1,7 +1,8 @@
 # -*- coding: binary -*-
 
 require 'socket'
-require 'fcntl'
+
+require 'rex/io/relay_manager'
 
 module Rex
   module IO
@@ -12,6 +13,7 @@ module Rex
     #
     ###
     module SocketAbstraction
+
       ###
       #
       # Extension information for required Stream interface.
@@ -54,7 +56,7 @@ module Rex
       def cleanup_abstraction
         lsock.close if lsock and !lsock.closed?
 
-        monitor_thread.join if monitor_thread&.alive?
+        monitor_thread.join if monitor_thread&.alive? && monitor_thread&.object_id != Thread.current.object_id
 
         rsock.close if rsock and !rsock.closed?
 
@@ -114,105 +116,27 @@ module Rex
       #
       attr_reader :rsock
 
-      module MonitoredRSock
-        def close
-          @close_requested = true
-          @monitor_thread.join
-          nil
-        end
-
-        def sysclose
-          self.class.instance_method(:close).bind(self).call
-        end
-
-        attr_reader :close_requested
-        attr_writer :monitor_thread
-      end
-
       protected
 
-      def monitor_rsock(threadname = 'SocketMonitorRemote')
-        rsock.extend(MonitoredRSock)
-        rsock.monitor_thread = self.monitor_thread = Rex::ThreadFactory.spawn(threadname, false) do
-          loop do
-            closed = rsock.nil? || rsock.close_requested
-
-            if closed
-              wlog('monitor_rsock: the remote socket has been closed, exiting loop')
-              break
-            end
-
-            buf = nil
-
-            begin
-              s = Rex::ThreadSafe.select([rsock], nil, nil, 0.2)
-              next if s.nil? || s[0].nil?
-            rescue Exception => e
-              wlog("monitor_rsock: exception during select: #{e.class} #{e}")
-              closed = true
-            end
-
-            unless closed
-              begin
-                buf = rsock.sysread(32_768)
-                if buf.nil?
-                  closed = true
-                  wlog('monitor_rsock: closed remote socket due to nil read')
-                end
-              rescue EOFError => e
-                closed = true
-                dlog('monitor_rsock: EOF in rsock')
-              rescue ::Exception => e
-                closed = true
-                wlog("monitor_rsock: exception during read: #{e.class} #{e}")
-              end
-            end
-
-            unless closed
-              total_sent = 0
-              total_length = buf.length
-              while total_sent < total_length
-                begin
-                  data = buf[total_sent, buf.length]
-
-                  # Note that this must be write() NOT syswrite() or put() or anything like it.
-                  # Using syswrite() breaks SSL streams.
-                  sent = write(data)
-
-                  # sf: Only remove the data off the queue is write was successful.
-                  #     This way we naturally perform a resend if a failure occurred.
-                  #     Catches an edge case with meterpreter TCP channels where remote send
-                  #     fails gracefully and a resend is required.
-                  if sent.nil?
-                    closed = true
-                    wlog('monitor_rsock: failed writing, socket must be dead')
-                    break
-                  elsif sent > 0
-                    total_sent += sent
-                  end
-                rescue ::IOError, ::EOFError => e
-                  closed = true
-                  wlog("monitor_rsock: exception during write: #{e.class} #{e}")
-                  break
-                end
-              end
-            end
-
-            next unless closed
-
-            begin
-              close_write if respond_to?('close_write')
-            rescue StandardError
-            end
-
-            break
-          end
-
-          rsock.sysclose
+      def monitor_rsock(name = 'MonitorRemote')
+        if respond_to?(:close_write)
+          on_exit = method(:close_write)
+        else
+          on_exit = nil
         end
+
+        monitor_sock(rsock, sink: self, name: name, on_exit: on_exit)
       end
 
-      attr_accessor :monitor_thread
+      def monitor_sock(sock, sink:, name:, on_exit: nil)
+        @relay_manager ||= Rex::IO::RelayManager.new
+        @relay_manager.add_relay(sock, sink: sink, name: name, on_exit: on_exit)
+      end
+
+      def monitor_thread
+        @relay_manager&.thread
+      end
+
       attr_writer :lsock, :rsock
     end
   end
