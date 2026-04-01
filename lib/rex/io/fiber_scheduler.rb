@@ -133,6 +133,18 @@ module IO
       @urgent.nil?
     end
 
+    def reset!
+      @mutex.synchronize do
+        @readable.clear
+        @writable.clear
+        @waiting.clear
+        @ready.clear
+        @pending.clear
+        @blocking = 0
+        @urgent = Rex::Compat.pipe
+      end
+    end
+
     def fiber(&block)
       fiber = Fiber.new(blocking: false, &block)
       fiber.resume

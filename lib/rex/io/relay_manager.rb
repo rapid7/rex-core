@@ -70,6 +70,7 @@ class RelayManager
     @scheduler.run
   ensure
     Fiber.set_scheduler(old_scheduler)
+    @scheduler.reset!
   end
 
   def relay_fiber(sock, sink, name, on_exit: nil)
