@@ -1,5 +1,6 @@
 require 'rex/compat'
 require 'rex/io/fiber_scheduler'
+require 'timeout'
 
 RSpec.describe Rex::IO::FiberScheduler do
   let(:scheduler) { described_class.new }
@@ -193,47 +194,27 @@ RSpec.describe Rex::IO::FiberScheduler do
 
     it 'handles blocking count correctly' do
       blocking_count = nil
-      block_started = false
-      mutex = Mutex.new
-      cv = ConditionVariable.new
+      fiber_to_unblock = Queue.new
 
       scheduler.schedule_fiber do
-        fiber = Fiber.current
-        scheduler.schedule_fiber do
-          # Wait until we've checked the blocking count
-          mutex.synchronize do
-            cv.wait(mutex) until block_started
-          end
-          scheduler.unblock(:test, fiber)
-        end
-
-        # Signal that we're about to block
-        mutex.synchronize do
-          block_started = true
-          cv.signal
-        end
-
+        fiber_to_unblock << Fiber.current
         scheduler.block(:test)
         blocking_count = scheduler.instance_variable_get(:@blocking)
       end
 
       run_thread = Thread.new { scheduler.run }
+      fiber = Timeout.timeout(1) { fiber_to_unblock.pop }
 
-      # Wait for the fiber to signal it's blocking
-      mutex.synchronize do
-        cv.wait(mutex) until block_started
+      Timeout.timeout(1) do
+        Thread.pass until scheduler.instance_variable_get(:@blocking) == 1
       end
 
-      # Now we know for sure the fiber is blocked
       expect(scheduler.instance_variable_get(:@blocking)).to eq(1)
 
-      # Signal the unblocking fiber to proceed
-      mutex.synchronize { cv.signal }
+      scheduler.unblock(:test, fiber)
 
-      # Wait for completion
-      run_thread.join
+      expect(run_thread.join(1)).to eq(run_thread)
 
-      # After unblocking, count should be back to 0
       expect(blocking_count).to eq(0)
     end
   end
