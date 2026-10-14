@@ -1,5 +1,6 @@
 require 'rex/compat'
 require 'rex/io/fiber_scheduler'
+require 'timeout'
 
 RSpec.describe Rex::IO::FiberScheduler do
   let(:scheduler) { described_class.new }
@@ -20,11 +21,8 @@ RSpec.describe Rex::IO::FiberScheduler do
       expect(scheduler.instance_variable_get(:@blocking)).to eq(0)
     end
 
-    it 'creates an urgent pipe for signaling' do
-      urgent = scheduler.instance_variable_get(:@urgent)
-      expect(urgent).to be_a(Array)
-      expect(urgent.first).to be_a(IO)
-      expect(urgent.last).to be_a(IO)
+    it 'does not allocate a signaling pipe before work is scheduled' do
+      expect(scheduler).to be_closed
     end
 
     it 'creates a mutex for thread safety' do
@@ -60,9 +58,8 @@ RSpec.describe Rex::IO::FiberScheduler do
     end
 
     it 'wakes up the scheduler via urgent pipe' do
-      urgent_pipe = scheduler.instance_variable_get(:@urgent)
-
       scheduler.schedule_fiber { :test }
+      urgent_pipe = scheduler.instance_variable_get(:@urgent)
 
       # The urgent pipe should have data
       readable, = IO.select([urgent_pipe.first], nil, nil, 0)
@@ -197,47 +194,27 @@ RSpec.describe Rex::IO::FiberScheduler do
 
     it 'handles blocking count correctly' do
       blocking_count = nil
-      block_started = false
-      mutex = Mutex.new
-      cv = ConditionVariable.new
+      fiber_to_unblock = Queue.new
 
       scheduler.schedule_fiber do
-        fiber = Fiber.current
-        scheduler.schedule_fiber do
-          # Wait until we've checked the blocking count
-          mutex.synchronize do
-            cv.wait(mutex) until block_started
-          end
-          scheduler.unblock(:test, fiber)
-        end
-
-        # Signal that we're about to block
-        mutex.synchronize do
-          block_started = true
-          cv.signal
-        end
-
+        fiber_to_unblock << Fiber.current
         scheduler.block(:test)
         blocking_count = scheduler.instance_variable_get(:@blocking)
       end
 
       run_thread = Thread.new { scheduler.run }
+      fiber = Timeout.timeout(1) { fiber_to_unblock.pop }
 
-      # Wait for the fiber to signal it's blocking
-      mutex.synchronize do
-        cv.wait(mutex) until block_started
+      Timeout.timeout(1) do
+        Thread.pass until scheduler.instance_variable_get(:@blocking) == 1
       end
 
-      # Now we know for sure the fiber is blocked
       expect(scheduler.instance_variable_get(:@blocking)).to eq(1)
 
-      # Signal the unblocking fiber to proceed
-      mutex.synchronize { cv.signal }
+      scheduler.unblock(:test, fiber)
 
-      # Wait for completion
-      run_thread.join
+      expect(run_thread.join(1)).to eq(run_thread)
 
-      # After unblocking, count should be back to 0
       expect(blocking_count).to eq(0)
     end
   end
@@ -469,6 +446,7 @@ RSpec.describe Rex::IO::FiberScheduler do
     it 'adds fiber to ready queue' do
       fiber = Fiber.new(blocking: false) { Fiber.yield }
       fiber.resume
+      scheduler.schedule_fiber { :active }
 
       scheduler.unblock(:test, fiber)
 
@@ -479,6 +457,7 @@ RSpec.describe Rex::IO::FiberScheduler do
     it 'signals via urgent pipe' do
       fiber = Fiber.new(blocking: false) { Fiber.yield }
       fiber.resume
+      scheduler.schedule_fiber { :active }
 
       urgent_pipe = scheduler.instance_variable_get(:@urgent)
 
@@ -518,6 +497,7 @@ RSpec.describe Rex::IO::FiberScheduler do
     end
 
     it 'closes urgent pipe' do
+      scheduler.schedule_fiber { :done }
       urgent = scheduler.instance_variable_get(:@urgent)
       original_pipes = urgent.dup
 
@@ -531,6 +511,71 @@ RSpec.describe Rex::IO::FiberScheduler do
     it 'sets urgent to nil' do
       scheduler.close
       expect(scheduler.instance_variable_get(:@urgent)).to be_nil
+    end
+  end
+
+  describe '#reset!' do
+    it 'closes the existing urgent pipe without retaining a replacement' do
+      scheduler.schedule_fiber { :discarded }
+      original_urgent = scheduler.instance_variable_get(:@urgent).dup
+
+      scheduler.reset!
+
+      expect(original_urgent).to all(be_closed)
+      expect(scheduler).to be_closed
+    end
+
+    it 'lazily creates a signaling pipe for work scheduled after reset' do
+      result = nil
+
+      scheduler.reset!
+      scheduler.schedule_fiber { result = :done }
+      replacement_urgent = scheduler.instance_variable_get(:@urgent)
+
+      expect(replacement_urgent).to all(satisfy { |io| !io.closed? })
+      scheduler.run
+
+      expect(result).to eq(:done)
+    end
+  end
+
+  describe '#work_pending?' do
+    it 'tracks scheduled work until it has run' do
+      expect(scheduler.work_pending?).to be false
+
+      scheduler.schedule_fiber { :done }
+      expect(scheduler.work_pending?).to be true
+
+      scheduler.run
+      expect(scheduler.work_pending?).to be false
+    end
+  end
+
+  describe 'exception cleanup' do
+    it 'closes the urgent pipe when scheduled work raises during close' do
+      scheduler.schedule_fiber { raise 'scheduled failure' }
+      original_urgent = scheduler.instance_variable_get(:@urgent).dup
+
+      expect { scheduler.close }.to raise_error(RuntimeError, 'scheduled failure')
+      expect(original_urgent).to all(be_closed)
+      expect(scheduler).to be_closed
+    end
+
+    it 'drains accepted work before propagating the first close error' do
+      completed = false
+      scheduler.schedule_fiber { raise 'scheduled failure' }
+      scheduler.schedule_fiber { completed = true }
+
+      expect { scheduler.close }.to raise_error(RuntimeError, 'scheduled failure')
+      expect(completed).to be true
+      expect(scheduler).to be_closed
+    end
+
+    it 'does not recreate a signaling pipe for a stale unblock after reset' do
+      scheduler.reset!
+
+      expect(scheduler.unblock(:stale, Fiber.new { :done })).to be false
+      expect(scheduler).to be_closed
     end
   end
 

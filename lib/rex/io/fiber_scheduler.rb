@@ -15,29 +15,25 @@ module IO
       @ready = []
       @pending = []
       @blocking = 0
-      @urgent = Rex::Compat.pipe
+      @urgent = nil
       @mutex = Mutex.new
     end
 
     # This allows the fiber to be scheduled in the #run thread from another thread
     def schedule_fiber(&block)
       @mutex.synchronize do
+        @urgent ||= Rex::Compat.pipe
         @pending << block
+        # Wake up the scheduler while holding the same lock used by #reset! so
+        # the signaling pipe cannot be replaced between lookup and write.
+        @urgent.last.write_nonblock('.', exception: false)
       end
-      # Wake up the scheduler
-      @urgent.last.write_nonblock('.') rescue nil
     end
 
     def run
       while @readable.any? or @writable.any? or @waiting.any? or @blocking.positive? or @ready.any? or @pending.any?
         # Start any pending fibers
-        pending_blocks = []
-        @mutex.synchronize do
-          pending_blocks = @pending.dup
-          @pending.clear
-        end
-
-        pending_blocks.each do |block|
+        while (block = @mutex.synchronize { @pending.shift })
           fiber = Fiber.new(blocking: false, &block)
           fiber.resume
         end
@@ -75,8 +71,7 @@ module IO
           end
         end
 
-        ready, @ready = @ready, []
-        ready.each do |fiber|
+        while (fiber = @mutex.synchronize { @ready.shift })
           fiber.resume
         end
       end
@@ -118,19 +113,40 @@ module IO
     end
 
     def unblock(blocker, fiber)
-      @ready << fiber
-      io = @urgent.last
-      io.write_nonblock('.')
+      @mutex.synchronize do
+        return false unless @urgent
+
+        @ready << fiber
+        @urgent.last.write_nonblock('.', exception: false)
+      end
     end
 
     def close
-      run
-      @urgent.each(&:close)
-      @urgent = nil
+      first_error = nil
+
+      loop do
+        begin
+          run
+          break
+        rescue StandardError => e
+          first_error ||= e
+          break unless work_pending?
+        end
+      end
+
+      raise first_error if first_error
+    ensure
+      close_urgent_pipe
     end
 
     def closed?
-      @urgent.nil?
+      @mutex.synchronize { @urgent.nil? }
+    end
+
+    def work_pending?
+      @mutex.synchronize do
+        @readable.any? || @writable.any? || @waiting.any? || @blocking.positive? || @ready.any? || @pending.any?
+      end
     end
 
     def reset!
@@ -141,7 +157,7 @@ module IO
         @ready.clear
         @pending.clear
         @blocking = 0
-        @urgent = Rex::Compat.pipe
+        close_urgent_pipe_without_lock
       end
     end
 
@@ -152,6 +168,15 @@ module IO
     end
 
     private
+
+    def close_urgent_pipe
+      @mutex.synchronize { close_urgent_pipe_without_lock }
+    end
+
+    def close_urgent_pipe_without_lock
+      @urgent&.each { |io| io.close unless io.closed? }
+      @urgent = nil
+    end
 
     def current_time
       Process.clock_gettime(Process::CLOCK_MONOTONIC)

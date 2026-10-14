@@ -1,5 +1,6 @@
 require 'rex/io/relay_manager'
 require 'socket'
+require 'timeout'
 
 RSpec.describe Rex::IO::RelayManager do
   let(:manager) { described_class.new }
@@ -23,7 +24,274 @@ RSpec.describe Rex::IO::RelayManager do
     end
   end
 
+  describe 'worker teardown' do
+    it 'does not retain the scheduler signaling pipe while idle' do
+      r, w = IO.pipe
+      scheduler = manager.instance_variable_get(:@scheduler)
+
+      manager.add_relay(r, sink: StringIO.new, name: 'test')
+      relay_thread = manager.thread
+      w.close
+
+      expect(relay_thread.join(1)).to eq(relay_thread)
+      expect(scheduler).to be_closed
+    ensure
+      [r, w].compact.each { |io| io.close unless io.closed? }
+    end
+
+    it 'processes a relay submitted after the scheduler observes an empty queue' do
+      first_r, first_w = IO.pipe
+      second_r, second_w = IO.pipe
+      first_sink = StringIO.new
+      second_sink = StringIO.new
+      scheduler = manager.instance_variable_get(:@scheduler)
+      run_returned = Queue.new
+      release_run = Queue.new
+      blocked_once = false
+
+      allow(scheduler).to receive(:run).and_wrap_original do |method|
+        result = method.call
+        unless blocked_once
+          blocked_once = true
+          run_returned << true
+          release_run.pop
+        end
+        result
+      end
+
+      manager.add_relay(first_r, sink: first_sink, name: 'first')
+      relay_thread = manager.thread
+      first_w.write('first')
+      first_w.close
+      Timeout.timeout(1) { run_returned.pop }
+
+      manager.add_relay(second_r, sink: second_sink, name: 'second')
+      second_w.write('second')
+      second_w.close
+      release_run << true
+
+      expect(relay_thread.join(1)).to eq(relay_thread)
+      expect(first_sink.string).to eq('first')
+      expect(second_sink.string).to eq('second')
+      expect(scheduler).to be_closed
+    ensure
+      release_run << true if blocked_once && release_run&.empty?
+      [first_r, first_w, second_r, second_w].compact.each { |io| io.close unless io.closed? }
+    end
+
+    it 'processes a relay submitted while the worker is resetting' do
+      first_r, first_w = IO.pipe
+      second_r, second_w = IO.pipe
+      first_sink = StringIO.new
+      second_sink = StringIO.new
+      scheduler = manager.instance_variable_get(:@scheduler)
+      reset_reached = Queue.new
+      release_reset = Queue.new
+      blocked_once = false
+
+      allow(scheduler).to receive(:reset!).and_wrap_original do |method|
+        unless blocked_once
+          blocked_once = true
+          reset_reached << true
+          release_reset.pop
+        end
+        method.call
+      end
+
+      manager.add_relay(first_r, sink: first_sink, name: 'first')
+      first_thread = manager.thread
+      first_w.write('first')
+      first_w.close
+      reset_reached.pop
+
+      scheduling_thread = Thread.new do
+        manager.add_relay(second_r, sink: second_sink, name: 'second')
+        second_w.write('second')
+        second_w.close
+      end
+      expect(scheduling_thread.join(0.01)).to be_nil
+      release_reset << true
+
+      expect(first_thread.join(1)).to eq(first_thread)
+      expect(scheduling_thread.join(1)).to eq(scheduling_thread)
+      second_thread = manager.thread
+      expect(second_thread).not_to eq(first_thread)
+      expect(second_thread.join(1)).to eq(second_thread)
+      expect(first_sink.string).to eq('first')
+      expect(second_sink.string).to eq('second')
+      expect(scheduler).to be_closed
+    ensure
+      release_reset << true if blocked_once && release_reset&.empty?
+      [first_r, first_w, second_r, second_w].compact.each { |io| io.close unless io.closed? }
+    end
+
+    it 'closes the scheduler and remains reusable when a relay callback raises' do
+      first_r, first_w = IO.pipe
+      second_r, second_w = IO.pipe
+      second_sink = StringIO.new
+      scheduler = manager.instance_variable_get(:@scheduler)
+
+      manager.add_relay(
+        first_r,
+        sink: StringIO.new,
+        name: 'raising-callback',
+        on_exit: proc { raise 'callback failed' }
+      )
+      first_thread = manager.thread
+      first_thread.report_on_exception = false
+      first_w.close
+
+      expect { first_thread.value }.to raise_error(RuntimeError, 'callback failed')
+      expect(scheduler).to be_closed
+
+      manager.add_relay(second_r, sink: second_sink, name: 'second')
+      second_thread = manager.thread
+      second_w.write('second')
+      second_w.close
+
+      expect(second_thread.join(1)).to eq(second_thread)
+      expect(second_sink.string).to eq('second')
+      expect(scheduler).to be_closed
+    ensure
+      [first_r, first_w, second_r, second_w].compact.each { |io| io.close unless io.closed? }
+    end
+
+    it 'drains a follow-up relay when its teardown callback raises after adding it' do
+      first_r, first_w = IO.pipe
+      second_r, second_w = IO.pipe
+      third_r, third_w = IO.pipe
+      fourth_r, fourth_w = IO.pipe
+      third_sink = StringIO.new
+      fourth_sink = StringIO.new
+      first_callback = Queue.new
+      scheduler = manager.instance_variable_get(:@scheduler)
+
+      manager.add_relay(
+        first_r,
+        sink: StringIO.new,
+        name: 'raising-callback',
+        on_exit: proc do
+          first_callback << true
+          raise 'callback failed'
+        end
+      )
+      manager.add_relay(
+        second_r,
+        sink: StringIO.new,
+        name: 'teardown-callback',
+        on_exit: proc do
+          manager.add_relay(
+            third_r,
+            sink: third_sink,
+            name: 'callback-relay',
+            on_exit: proc do
+              manager.add_relay(fourth_r, sink: fourth_sink, name: 'nested-callback-relay')
+            end
+          )
+          raise 'teardown callback failed'
+        end
+      )
+      relay_thread = manager.thread
+      relay_thread.report_on_exception = false
+
+      third_w.write('third')
+      third_w.close
+      fourth_w.write('fourth')
+      fourth_w.close
+      first_w.close
+      Timeout.timeout(1) { first_callback.pop }
+      second_w.close
+
+      expect { relay_thread.value }.to raise_error(RuntimeError, 'teardown callback failed')
+      expect(third_sink.string).to eq('third')
+      expect(fourth_sink.string).to eq('fourth')
+      expect(scheduler).to be_closed
+    ensure
+      [first_r, first_w, second_r, second_w, third_r, third_w, fourth_r, fourth_w].compact.each do |io|
+        io.close unless io.closed?
+      end
+    end
+  end
+
   describe '#add_relay' do
+    it 'releases the gated worker and remains reusable when scheduling fails' do
+      first_r, first_w = IO.pipe
+      second_r, second_w = IO.pipe
+      first_sink = StringIO.new
+      second_sink = StringIO.new
+      scheduler = manager.instance_variable_get(:@scheduler)
+      failed_once = false
+
+      allow(scheduler).to receive(:schedule_fiber).and_wrap_original do |method, &block|
+        unless failed_once
+          failed_once = true
+          raise Errno::EMFILE, 'synthetic descriptor exhaustion'
+        end
+        method.call(&block)
+      end
+
+      first_w.write('rejected')
+      expect do
+        manager.add_relay(first_r, sink: first_sink, name: 'rejected')
+      end.to raise_error(Errno::EMFILE, /synthetic descriptor exhaustion/)
+      failed_thread = manager.thread
+
+      expect(failed_thread.join(1)).to eq(failed_thread)
+      expect(scheduler).to be_closed
+      expect(scheduler.work_pending?).to be false
+      expect(first_sink.string).to be_empty
+
+      manager.add_relay(second_r, sink: second_sink, name: 'accepted')
+      relay_thread = manager.thread
+      second_w.write('accepted')
+      second_w.close
+
+      expect(relay_thread.join(1)).to eq(relay_thread)
+      expect(second_sink.string).to eq('accepted')
+      expect(first_sink.string).to be_empty
+      expect(scheduler).to be_closed
+    ensure
+      [first_r, first_w, second_r, second_w].compact.each { |io| io.close unless io.closed? }
+    end
+
+    it 'does not retain rejected work when the worker thread can not start' do
+      first_r, first_w = IO.pipe
+      second_r, second_w = IO.pipe
+      first_sink = StringIO.new
+      second_sink = StringIO.new
+      scheduler = manager.instance_variable_get(:@scheduler)
+      original_thread_new = Thread.method(:new)
+      failed_once = false
+
+      allow(Thread).to receive(:new) do |*arguments, &block|
+        unless failed_once
+          failed_once = true
+          raise ThreadError, 'synthetic thread exhaustion'
+        end
+        original_thread_new.call(*arguments, &block)
+      end
+
+      first_w.write('rejected')
+      expect do
+        manager.add_relay(first_r, sink: first_sink, name: 'rejected')
+      end.to raise_error(ThreadError, 'synthetic thread exhaustion')
+      expect(scheduler).to be_closed
+      expect(scheduler.work_pending?).to be false
+      expect(first_sink.string).to be_empty
+
+      manager.add_relay(second_r, sink: second_sink, name: 'accepted')
+      relay_thread = manager.thread
+      second_w.write('accepted')
+      second_w.close
+
+      expect(relay_thread.join(1)).to eq(relay_thread)
+      expect(second_sink.string).to eq('accepted')
+      expect(first_sink.string).to be_empty
+      expect(scheduler).to be_closed
+    ensure
+      [first_r, first_w, second_r, second_w].compact.each { |io| io.close unless io.closed? }
+    end
+
     it 'schedules a relay fiber' do
       r, w = IO.pipe
       sink = StringIO.new
